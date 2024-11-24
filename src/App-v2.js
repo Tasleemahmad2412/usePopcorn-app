@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import StarRating from "./StarRating";
+import { useMovies } from "./useMovies";
+import { useLocalStorageState } from "./useLocalStorageState";
+import { useKey } from "./useKey";
 
 const average = (arr) =>
   arr.reduce((acc, cur, i, arr) => acc + cur / arr.length, 0);
@@ -7,12 +10,19 @@ const average = (arr) =>
 const KEY = "45d8b8ba";
 
 export default function App() {
-  const [movies, setMovies] = useState([]);
-  const [watched, setWatched] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [selectedID, setSelectedID] = useState(null);
+
+  const { movies, isLoading, error } = useMovies(query);
+  const [watched, setWatched] = useLocalStorageState([], "watched");
+
+  //const [watched, setWatched] = useState([]);
+  // const [watched, setWatched] = useState(() => {
+  //   // This function will only be executed once on initial render
+  //   const storedValue = localStorage.getItem("watched");
+  //   // because we have stored the value as a string to we have to parse the string
+  //   return JSON.parse(storedValue);
+  // });
 
   function handleSelectMovie(id) {
     setSelectedID((selectedID) => (id === selectedID ? null : id));
@@ -24,52 +34,12 @@ export default function App() {
 
   function handleAddWatched(movie) {
     setWatched((watched) => [...watched, movie]);
+    //localStorage.setItem("watched", JSON.stringify([...watched, movie]));
   }
 
   function handleDeleteWatched(id) {
     setWatched((watched) => watched.filter((movie) => movie.imdbID !== id));
   }
-
-  useEffect(() => {
-    const controller = new AbortController();
-    async function fetchMovies() {
-      try {
-        setIsLoading(true);
-        setError("");
-        const res = await fetch(
-          `http://www.omdbapi.com/?apikey=${KEY}&s=${query}`,
-          { signal: controller.signal }
-        );
-
-        if (!res.ok)
-          throw new Error("Something went wrong with fetching movies");
-
-        const data = await res.json();
-
-        if (data.Response === "False") throw new Error("Movie not found!!!");
-        setMovies(data.Search);
-        setError("");
-      } catch (err) {
-        if (err.name !== "AbortError") {
-          console.log(err.message);
-          setError(err.message);
-        }
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    if (query.length < 3) {
-      setMovies([]);
-      setError("");
-      return;
-    }
-
-    handleCloseMovie();
-    fetchMovies();
-    return function () {
-      controller.abort();
-    };
-  }, [query]);
 
   return (
     <>
@@ -114,6 +84,14 @@ function MovieDetails({ selectedID, onCloseMovie, onAddWatched, watched }) {
   const [movie, setMovie] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [userRating, setUserRating] = useState("");
+
+  // another usecase of Refs is to make a varibale that is persistent across renders
+  const countRef = useRef(0);
+
+  useEffect(() => {
+    if (userRating) countRef.current = countRef.current + 1;
+  }, [userRating]);
+
   const watchedUserRating = watched.find(
     (movie) => movie.imdbID === selectedID
   )?.userRating;
@@ -143,23 +121,14 @@ function MovieDetails({ selectedID, onCloseMovie, onAddWatched, watched }) {
       imdbRating: Number(imdbRating),
       runtime: Number(runtime.split(" ").at(0)),
       userRating,
+      countRatingDecisions: countRef.current,
     };
 
     onAddWatched(newWatchedMovie);
     onCloseMovie();
   }
 
-  useEffect(() => {
-    function callback(e) {
-      if (e.code === "Escape") {
-        onCloseMovie();
-      }
-    }
-    document.addEventListener("keydown", callback);
-    return function () {
-      document.removeEventListener("keydown", callback);
-    };
-  }, [onCloseMovie]);
+  useKey("Escape", onCloseMovie);
 
   useEffect(() => {
     async function getMovieDetails() {
@@ -281,6 +250,19 @@ function NumResults({ movies }) {
 }
 
 function Search({ query, setQuery }) {
+  // using a ref to select DOM elements it happens in 3 steps
+  // 1. we create the Ref, for that we use useRef hook when we work with DOM elements the Ref
+  //    hook usually have null
+  const inputEl = useRef(null);
+
+  useKey("Enter", function () {
+    if (document.activeElement === inputEl.current) return;
+    inputEl.current.focus();
+    setQuery("");
+  });
+
+  // Now using the Ref in Third step using the Effect hook
+
   return (
     <>
       <input
@@ -289,6 +271,8 @@ function Search({ query, setQuery }) {
         placeholder="Search movies..."
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        ref={inputEl}
+        // now it has been selected in a declarative way and now we dont need to manually select the element
       />
     </>
   );
